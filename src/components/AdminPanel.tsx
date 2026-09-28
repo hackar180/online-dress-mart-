@@ -109,7 +109,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
   const [annContent, setAnnContent] = useState('');
   const [annBadge, setAnnBadge] = useState('অফার');
 
-  if (!isOpen) return null;
+  const categoriesList: string[] = useMemo(() => {
+    if (categories && categories.length > 0) {
+      return categories.map((c) => c.name);
+    }
+    return [
+      'শাড়ি',
+      'থ্রি-পিস',
+      'টি-শার্ট',
+      'গেঞ্জি',
+      'ছেলেদের পোশাক',
+      'কসমেটিকস',
+      'চুড়ি',
+      'জুয়েলারি',
+      'অন্যান্য'
+    ];
+  }, [categories]);
 
   // Handle Admin Password Login (Secure Server Verification)
   const handleLoginSubmit = async (e: React.FormEvent) => {
@@ -420,22 +435,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
     setAnnContent('');
   };
 
-  const categoriesList: string[] = useMemo(() => {
-    if (categories && categories.length > 0) {
-      return categories.map((c) => c.name);
-    }
-    return [
-      'শাড়ি',
-      'থ্রি-পিস',
-      'টি-শার্ট',
-      'গেঞ্জি',
-      'ছেলেদের পোশাক',
-      'কসমেটিকস',
-      'চুড়ি',
-      'জুয়েলারি',
-      'অন্যান্য'
-    ];
-  }, [categories]);
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/90 backdrop-blur-xl flex items-center justify-center p-2 sm:p-4 md:p-6">
