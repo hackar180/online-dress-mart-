@@ -27,11 +27,11 @@ export const ComplaintBoxModal: React.FC<ComplaintBoxModalProps> = ({ isOpen, on
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!customerName || !customerPhone || !description) return;
 
-    const result = submitComplaint({
+    const result = await submitComplaint({
       customerName,
       customerPhone,
       customerEmail,

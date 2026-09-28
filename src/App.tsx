@@ -39,12 +39,14 @@ const MainStoreContent: React.FC = () => {
   // Categories list
   const categories = [
     'সকল (All)',
-    'শাড়ি (Saree)',
     'থ্রি-পিস (Three Piece)',
+    'শাড়ি (Saree)',
+    'জামা ও কুর্তি (Kameez & Kurti)',
     'লেহেঙ্গা (Lehenga)',
-    'কুর্তি (Kurti)',
     'গাউন (Gown)',
+    'পাঞ্জাবি (Panjabi)',
     'বোরকা ও হিজাব (Abaya & Borka)',
+    'অন্যান্য পোশাক (Other Dresses)',
     'এক্সক্লুসিভ পার্টি ড্রেস (Party Dress)'
   ];
 

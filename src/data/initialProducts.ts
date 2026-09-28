@@ -114,7 +114,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     stock: 25,
     sizes: ['38 (M)', '40 (L)', '42 (XL)', '44 (XXL)'],
     colors: ['সানফ্লাওয়ার ইয়েলো', 'স্কাই ব্লু', 'মিষ্টি গোলাপি', 'মিন্ট গ্রিন'],
-    category: 'কুর্তি (Kurti)',
+    category: 'জামা ও কুর্তি (Kameez & Kurti)',
     images: [
       'https://images.unsplash.com/photo-1609357605129-26f69add5d6e?auto=format&fit=crop&w=800&q=80',
       'https://images.unsplash.com/photo-1617627143750-d86bc21e42bb?auto=format&fit=crop&w=800&q=80',

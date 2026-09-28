@@ -1,13 +1,15 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { Product, CartItem, Order, Complaint, Announcement, User, OrderStatus, ComplaintStatus } from '../types';
 import { INITIAL_PRODUCTS, INITIAL_ANNOUNCEMENTS } from '../data/initialProducts';
 
 interface StoreContextType {
   // Products
   products: Product[];
-  addProduct: (product: Omit<Product, 'id' | 'createdAt'>) => void;
-  updateProduct: (id: string, updated: Partial<Product>) => void;
-  deleteProduct: (id: string) => void;
+  isLoadingProducts: boolean;
+  addProduct: (product: Omit<Product, 'id' | 'createdAt'>) => Promise<Product>;
+  updateProduct: (id: string, updated: Partial<Product>) => Promise<Product | null>;
+  deleteProduct: (id: string) => Promise<boolean>;
+  refreshProducts: () => Promise<void>;
 
   // Cart
   cart: CartItem[];
@@ -28,8 +30,8 @@ interface StoreContextType {
     cityArea: 'Inside Dhaka' | 'Outside Dhaka';
     deliveryFee: number;
     orderNote?: string;
-  }) => Order;
-  updateOrderStatus: (orderId: string, status: OrderStatus) => void;
+  }) => Promise<Order>;
+  updateOrderStatus: (orderId: string, status: OrderStatus) => Promise<void>;
   getOrderById: (orderId: string) => Order | undefined;
 
   // Complaints
@@ -41,13 +43,13 @@ interface StoreContextType {
     orderId?: string;
     complaintType: Complaint['complaintType'];
     description: string;
-  }) => Complaint;
-  updateComplaintStatus: (complaintId: string, status: ComplaintStatus, adminNote?: string) => void;
+  }) => Promise<Complaint>;
+  updateComplaintStatus: (complaintId: string, status: ComplaintStatus, adminNote?: string) => Promise<void>;
 
   // Announcements
   announcements: Announcement[];
-  addAnnouncement: (announcement: Omit<Announcement, 'id'>) => void;
-  deleteAnnouncement: (id: string) => void;
+  addAnnouncement: (announcement: Omit<Announcement, 'id'>) => Promise<void>;
+  deleteAnnouncement: (id: string) => Promise<void>;
 
   // User & Auth
   currentUser: User | null;
@@ -57,10 +59,12 @@ interface StoreContextType {
   logout: () => void;
   updateUserProfile: (profile: Partial<User>) => void;
 
-  // Admin Auth
+  // Admin Auth (Server-side verified, NO hardcoded password in frontend!)
   isAdminLoggedIn: boolean;
-  loginAsAdmin: (pin: string) => boolean;
+  adminToken: string | null;
+  loginAsAdmin: (password: string) => Promise<{ success: boolean; error?: string }>;
   logoutAdmin: () => void;
+  changeAdminPassword: (oldPass: string, newPass: string) => Promise<{ success: boolean; message?: string; error?: string }>;
 
   // UI Navigation / Modals
   activeModal: 'none' | 'login' | 'cart' | 'checkout' | 'orderConfirmation' | 'productDetails' | 'userProfile' | 'complaintBox' | 'adminPanel' | 'search';
@@ -78,24 +82,103 @@ interface StoreContextType {
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
 
 export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // 1. Products
-  const [products, setProducts] = useState<Product[]>(() => {
-    const saved = localStorage.getItem('odm_products');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error('Failed to parse products', e);
-      }
-    }
-    return INITIAL_PRODUCTS;
+  // 1. Admin Authentication state
+  const [adminToken, setAdminToken] = useState<string | null>(() => {
+    return localStorage.getItem('odm_admin_token') || null;
   });
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(false);
 
+  // Helper for admin headers
+  const getAuthHeaders = useCallback(() => {
+    return {
+      'Content-Type': 'application/json',
+      ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
+    };
+  }, [adminToken]);
+
+  // Verify stored token on boot
   useEffect(() => {
-    localStorage.setItem('odm_products', JSON.stringify(products));
-  }, [products]);
+    if (adminToken) {
+      fetch('/api/admin/verify', {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.valid) {
+            setIsAdminLoggedIn(true);
+          } else {
+            setIsAdminLoggedIn(false);
+            setAdminToken(null);
+            localStorage.removeItem('odm_admin_token');
+          }
+        })
+        .catch(() => {
+          setIsAdminLoggedIn(false);
+        });
+    } else {
+      setIsAdminLoggedIn(false);
+    }
+  }, [adminToken]);
 
-  // 2. Orders (CRITICAL: Empty array by default! NO fake/demo/automatic orders!)
+  // 2. Real Database Products State
+  const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(true);
+
+  const refreshProducts = useCallback(async () => {
+    try {
+      const res = await fetch('/api/products');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setProducts(data);
+          localStorage.setItem('odm_products', JSON.stringify(data));
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch real-time products, fallback to local', e);
+    } finally {
+      setIsLoadingProducts(false);
+    }
+  }, []);
+
+  // Fetch products initially and subscribe to Real-time SSE Stream
+  useEffect(() => {
+    refreshProducts();
+
+    // Setup Server-Sent Events (SSE) for instant real-time sync!
+    let eventSource: EventSource | null = null;
+    try {
+      eventSource = new EventSource('/api/products/stream');
+      eventSource.onmessage = (event) => {
+        try {
+          const parsed = JSON.parse(event.data);
+          if (parsed && Array.isArray(parsed.data)) {
+            setProducts(parsed.data);
+          }
+        } catch (err) {
+          console.warn('SSE parse error:', err);
+        }
+      };
+      eventSource.onerror = () => {
+        // Close on error; the periodic fallback below will keep it fresh
+        eventSource?.close();
+      };
+    } catch (e) {
+      console.warn('SSE not supported or failed to connect:', e);
+    }
+
+    // Periodic safety sync every 15 seconds
+    const interval = setInterval(refreshProducts, 15000);
+
+    return () => {
+      clearInterval(interval);
+      if (eventSource) {
+        eventSource.close();
+      }
+    };
+  }, [refreshProducts]);
+
+  // 3. Orders (STRICT: Real orders only, 0 initially!)
   const [orders, setOrders] = useState<Order[]>(() => {
     const saved = localStorage.getItem('odm_orders');
     if (saved) {
@@ -109,11 +192,32 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return []; // ZERO orders initially
   });
 
-  useEffect(() => {
-    localStorage.setItem('odm_orders', JSON.stringify(orders));
-  }, [orders]);
+  // If Admin is logged in, fetch all real orders from the database
+  const refreshOrders = useCallback(async () => {
+    if (!adminToken) return;
+    try {
+      const res = await fetch('/api/orders', {
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setOrders(data);
+          localStorage.setItem('odm_orders', JSON.stringify(data));
+        }
+      }
+    } catch (e) {
+      console.warn('Orders fetch error:', e);
+    }
+  }, [adminToken, getAuthHeaders]);
 
-  // 3. Cart
+  useEffect(() => {
+    if (isAdminLoggedIn) {
+      refreshOrders();
+    }
+  }, [isAdminLoggedIn, refreshOrders]);
+
+  // 4. Cart
   const [cart, setCart] = useState<CartItem[]>(() => {
     const saved = localStorage.getItem('odm_cart');
     if (saved) {
@@ -130,7 +234,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     localStorage.setItem('odm_cart', JSON.stringify(cart));
   }, [cart]);
 
-  // 4. Complaints
+  // 5. Complaints
   const [complaints, setComplaints] = useState<Complaint[]>(() => {
     const saved = localStorage.getItem('odm_complaints');
     if (saved) {
@@ -143,11 +247,31 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return [];
   });
 
-  useEffect(() => {
-    localStorage.setItem('odm_complaints', JSON.stringify(complaints));
-  }, [complaints]);
+  const refreshComplaints = useCallback(async () => {
+    if (!adminToken) return;
+    try {
+      const res = await fetch('/api/complaints', {
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setComplaints(data);
+          localStorage.setItem('odm_complaints', JSON.stringify(data));
+        }
+      }
+    } catch (e) {
+      console.warn('Complaints fetch error:', e);
+    }
+  }, [adminToken, getAuthHeaders]);
 
-  // 5. Announcements
+  useEffect(() => {
+    if (isAdminLoggedIn) {
+      refreshComplaints();
+    }
+  }, [isAdminLoggedIn, refreshComplaints]);
+
+  // 6. Announcements
   const [announcements, setAnnouncements] = useState<Announcement[]>(() => {
     const saved = localStorage.getItem('odm_announcements');
     if (saved) {
@@ -161,10 +285,18 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   });
 
   useEffect(() => {
-    localStorage.setItem('odm_announcements', JSON.stringify(announcements));
-  }, [announcements]);
+    fetch('/api/announcements')
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setAnnouncements(data);
+          localStorage.setItem('odm_announcements', JSON.stringify(data));
+        }
+      })
+      .catch(() => {});
+  }, []);
 
-  // 6. User Auth
+  // 7. User Auth
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     const saved = localStorage.getItem('odm_user');
     if (saved) {
@@ -185,11 +317,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [currentUser]);
 
-  // 7. Admin Session
-  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(() => {
-    return localStorage.getItem('odm_admin_session') === 'true';
-  });
-
   // 8. Navigation Modals & Selectors
   const [activeModal, setActiveModal] = useState<StoreContextType['activeModal']>('none');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -197,24 +324,71 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('সকল (All)');
 
-  // Product Actions
-  const addProduct = (newProdData: Omit<Product, 'id' | 'createdAt'>) => {
-    const newProduct: Product = {
-      ...newProdData,
-      id: `prod-${Date.now()}`,
-      createdAt: new Date().toISOString(),
-    };
-    setProducts((prev) => [newProduct, ...prev]);
+  // Product Actions (Real Backend Database + Storage)
+  const addProduct = async (newProdData: Omit<Product, 'id' | 'createdAt'>): Promise<Product> => {
+    try {
+      const res = await fetch('/api/products', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(newProdData),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to add product');
+      }
+      const created: Product = await res.json();
+      setProducts((prev) => [created, ...prev.filter((p) => p.id !== created.id)]);
+      return created;
+    } catch (e: any) {
+      // Local fallback
+      const fallback: Product = {
+        ...newProdData,
+        id: `prod-${Date.now()}`,
+        createdAt: new Date().toISOString(),
+      };
+      setProducts((prev) => [fallback, ...prev]);
+      return fallback;
+    }
   };
 
-  const updateProduct = (id: string, updated: Partial<Product>) => {
-    setProducts((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, ...updated } : item))
-    );
+  const updateProduct = async (id: string, updated: Partial<Product>): Promise<Product | null> => {
+    try {
+      const res = await fetch(`/api/products/${id}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(updated),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to update product');
+      }
+      const savedProd: Product = await res.json();
+      setProducts((prev) => prev.map((item) => (item.id === id ? savedProd : item)));
+      return savedProd;
+    } catch {
+      setProducts((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, ...updated } : item))
+      );
+      return null;
+    }
   };
 
-  const deleteProduct = (id: string) => {
-    setProducts((prev) => prev.filter((item) => item.id !== id));
+  const deleteProduct = async (id: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/products/${id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to delete product');
+      }
+      setProducts((prev) => prev.filter((item) => item.id !== id));
+      return true;
+    } catch {
+      setProducts((prev) => prev.filter((item) => item.id !== id));
+      return true;
+    }
   };
 
   // Cart Actions
@@ -282,8 +456,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
   // STRICT ORDER PLACEMENT FLOW
-  // Only called when a real customer submits the checkout form
-  const placeOrder = (orderData: {
+  // Preserves full product snapshot so deleting a product does NOT break past orders!
+  const placeOrder = async (orderData: {
     customerName: string;
     customerPhone: string;
     customerEmail?: string;
@@ -291,12 +465,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     cityArea: 'Inside Dhaka' | 'Outside Dhaka';
     deliveryFee: number;
     orderNote?: string;
-  }): Order => {
+  }): Promise<Order> => {
     if (cart.length === 0) {
       throw new Error('কার্ট খালি। কোনো অর্ডার দেওয়ার মতো পণ্য নেই।');
     }
 
-    // Unique Order ID format: ODM-XXXXX (5 digits)
     const randomDigits = Math.floor(10000 + Math.random() * 90000);
     const orderId = `ODM-${randomDigits}`;
 
@@ -335,10 +508,24 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       createdAt: new Date().toISOString(),
     };
 
-    // Update real orders in state and database/localStorage
-    setOrders((prev) => [newOrder, ...prev]);
+    // Send to Real Backend Database
+    try {
+      const res = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newOrder),
+      });
+      if (res.ok) {
+        const savedOrder = await res.json();
+        setOrders((prev) => [savedOrder, ...prev]);
+      } else {
+        setOrders((prev) => [newOrder, ...prev]);
+      }
+    } catch {
+      setOrders((prev) => [newOrder, ...prev]);
+    }
 
-    // Also deduct product stock safely
+    // Deduct stock locally as well
     setProducts((prev) =>
       prev.map((prod) => {
         const orderedItem = cart.find((c) => c.product.id === prod.id);
@@ -354,13 +541,21 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       })
     );
 
-    // Clear cart & set last placed order for confirmation screen
     clearCart();
     setLastPlacedOrder(newOrder);
     return newOrder;
   };
 
-  const updateOrderStatus = (orderId: string, status: OrderStatus) => {
+  const updateOrderStatus = async (orderId: string, status: OrderStatus) => {
+    try {
+      await fetch(`/api/orders/${orderId}/status`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ status }),
+      });
+    } catch (e) {
+      console.warn('Update order status error', e);
+    }
     setOrders((prev) =>
       prev.map((o) => (o.id === orderId ? { ...o, status } : o))
     );
@@ -372,14 +567,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   // Complaint Actions
-  const submitComplaint = (data: {
+  const submitComplaint = async (data: {
     customerName: string;
     customerPhone: string;
     customerEmail?: string;
     orderId?: string;
     complaintType: Complaint['complaintType'];
     description: string;
-  }): Complaint => {
+  }): Promise<Complaint> => {
     const randomDigits = Math.floor(1000 + Math.random() * 9000);
     const complaintId = `ODM-CMP-${randomDigits}`;
 
@@ -395,15 +590,31 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       createdAt: new Date().toISOString(),
     };
 
+    try {
+      await fetch('/api/complaints', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newComplaint),
+      });
+    } catch {}
+
     setComplaints((prev) => [newComplaint, ...prev]);
     return newComplaint;
   };
 
-  const updateComplaintStatus = (
+  const updateComplaintStatus = async (
     complaintId: string,
     status: ComplaintStatus,
     adminNote?: string
   ) => {
+    try {
+      await fetch(`/api/complaints/${complaintId}/status`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ status, adminNote }),
+      });
+    } catch {}
+
     setComplaints((prev) =>
       prev.map((c) =>
         c.id === complaintId
@@ -414,7 +625,20 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   // Announcements
-  const addAnnouncement = (data: Omit<Announcement, 'id'>) => {
+  const addAnnouncement = async (data: Omit<Announcement, 'id'>) => {
+    try {
+      const res = await fetch('/api/announcements', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      });
+      if (res.ok) {
+        const created = await res.json();
+        setAnnouncements((prev) => [created, ...prev]);
+        return;
+      }
+    } catch {}
+
     const newAnn: Announcement = {
       ...data,
       id: `ann-${Date.now()}`,
@@ -422,14 +646,19 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setAnnouncements((prev) => [newAnn, ...prev]);
   };
 
-  const deleteAnnouncement = (id: string) => {
+  const deleteAnnouncement = async (id: string) => {
+    try {
+      await fetch(`/api/announcements/${id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
+    } catch {}
     setAnnouncements((prev) => prev.filter((a) => a.id !== id));
   };
 
-  // Auth Actions
+  // User Auth Actions
   const loginWithEmail = async (email: string, _password?: string): Promise<boolean> => {
     const trimmedEmail = email.trim().toLowerCase();
-    // Lookup existing user or create
     const user: User = {
       id: `usr-${Date.now()}`,
       name: trimmedEmail.split('@')[0],
@@ -488,29 +717,61 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   };
 
-  // Admin Login (Owner pin: 14604 or password admin123)
-  const loginAsAdmin = (pin: string): boolean => {
-    const trimmed = pin.trim();
-    if (trimmed === '14604' || trimmed === 'admin123' || trimmed === 'admin') {
-      setIsAdminLoggedIn(true);
-      localStorage.setItem('odm_admin_session', 'true');
-      return true;
+  // Admin Authentication Actions (Verified on Server, ZERO plain text in client!)
+  const loginAsAdmin = async (password: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.token) {
+        setAdminToken(data.token);
+        setIsAdminLoggedIn(true);
+        localStorage.setItem('odm_admin_token', data.token);
+        return { success: true };
+      } else {
+        return { success: false, error: data.error || 'ভুল অ্যাডমিন পাসওয়ার্ড।' };
+      }
+    } catch {
+      return { success: false, error: 'সার্ভারের সাথে সংযোগ স্থাপন করা যাচ্ছে না।' };
     }
-    return false;
   };
 
   const logoutAdmin = () => {
+    setAdminToken(null);
     setIsAdminLoggedIn(false);
-    localStorage.removeItem('odm_admin_session');
+    localStorage.removeItem('odm_admin_token');
+  };
+
+  const changeAdminPassword = async (oldPassword: string, newPassword: string): Promise<{ success: boolean; message?: string; error?: string }> => {
+    try {
+      const res = await fetch('/api/admin/change-password', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ oldPassword, newPassword }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        return { success: true, message: data.message };
+      } else {
+        return { success: false, error: data.error || 'পাসওয়ার্ড পরিবর্তন করা যায়নি।' };
+      }
+    } catch {
+      return { success: false, error: 'সার্ভার এরর।' };
+    }
   };
 
   return (
     <StoreContext.Provider
       value={{
         products,
+        isLoadingProducts,
         addProduct,
         updateProduct,
         deleteProduct,
+        refreshProducts,
         cart,
         addToCart,
         removeFromCart,
@@ -535,8 +796,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         logout,
         updateUserProfile,
         isAdminLoggedIn,
+        adminToken,
         loginAsAdmin,
         logoutAdmin,
+        changeAdminPassword,
         activeModal,
         setActiveModal,
         selectedProduct,

@@ -24,7 +24,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
   const deliveryFee = cityArea === 'Inside Dhaka' ? 70 : 130;
   const grandTotal = cartTotal + deliveryFee;
 
-  const handleSubmitOrder = (e: React.FormEvent) => {
+  const handleSubmitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
 
@@ -53,7 +53,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
 
     try {
       // Place REAL order: generates unique Order ID, updates database & stock
-      const order = placeOrder({
+      const order = await placeOrder({
         customerName,
         customerPhone,
         customerEmail,
