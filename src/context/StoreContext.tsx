@@ -1,8 +1,22 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { Product, CartItem, Order, Complaint, Announcement, User, OrderStatus, ComplaintStatus } from '../types';
+import { Product, CartItem, Order, Complaint, Announcement, User, OrderStatus, ComplaintStatus, CategoryItem } from '../types';
 import { INITIAL_PRODUCTS, INITIAL_ANNOUNCEMENTS } from '../data/initialProducts';
+import { INITIAL_CATEGORIES } from '../data/initialCategories';
 
 interface StoreContextType {
+  // Categories (Dynamic & Real Database)
+  categories: CategoryItem[];
+  selectedCategory: string;
+  setSelectedCategory: (cat: string) => void;
+  selectedSubCategory: string | null;
+  setSelectedSubCategory: (sub: string | null) => void;
+  addCategory: (catData: Omit<CategoryItem, 'id' | 'createdAt'>) => Promise<CategoryItem>;
+  updateCategory: (id: string, updated: Partial<CategoryItem>) => Promise<CategoryItem | null>;
+  deleteCategory: (id: string, force?: boolean) => Promise<{ success: boolean; productCount?: number; message?: string }>;
+  reorderCategories: (orderedIds: string[]) => Promise<void>;
+  suggestCategory: (name: string, description?: string) => Promise<{ category: string; subCategory?: string; confidence: number; reasoning: string }>;
+  refreshCategories: () => Promise<void>;
+
   // Products
   products: Product[];
   isLoadingProducts: boolean;
@@ -75,8 +89,6 @@ interface StoreContextType {
   setLastPlacedOrder: (order: Order | null) => void;
   searchQuery: string;
   setSearchQuery: (query: string) => void;
-  selectedCategory: string;
-  setSelectedCategory: (cat: string) => void;
 }
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
@@ -120,7 +132,36 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [adminToken]);
 
-  // 2. Real Database Products State
+  // 2. Real Database Categories State
+  const [categories, setCategories] = useState<CategoryItem[]>(() => {
+    const saved = localStorage.getItem('odm_categories');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {}
+    }
+    return INITIAL_CATEGORIES;
+  });
+
+  const [selectedSubCategory, setSelectedSubCategory] = useState<string | null>(null);
+
+  const refreshCategories = useCallback(async () => {
+    try {
+      const res = await fetch('/api/categories');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          setCategories(data);
+          localStorage.setItem('odm_categories', JSON.stringify(data));
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch categories', e);
+    }
+  }, []);
+
+  // 3. Real Database Products State
   const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
   const [isLoadingProducts, setIsLoadingProducts] = useState(true);
 
@@ -141,8 +182,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, []);
 
-  // Fetch products initially and subscribe to Real-time SSE Stream
+  // Fetch products & categories initially and subscribe to Real-time SSE Stream
   useEffect(() => {
+    refreshCategories();
     refreshProducts();
 
     // Setup Server-Sent Events (SSE) for instant real-time sync!
@@ -155,12 +197,19 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           if (parsed && Array.isArray(parsed.data)) {
             setProducts(parsed.data);
           }
+          if (parsed && Array.isArray(parsed.categories)) {
+            setCategories(parsed.categories);
+            localStorage.setItem('odm_categories', JSON.stringify(parsed.categories));
+          }
+          if (parsed && parsed.type === 'categories_updated' && Array.isArray(parsed.data)) {
+            setCategories(parsed.data);
+            localStorage.setItem('odm_categories', JSON.stringify(parsed.data));
+          }
         } catch (err) {
           console.warn('SSE parse error:', err);
         }
       };
       eventSource.onerror = () => {
-        // Close on error; the periodic fallback below will keep it fresh
         eventSource?.close();
       };
     } catch (e) {
@@ -168,7 +217,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
 
     // Periodic safety sync every 15 seconds
-    const interval = setInterval(refreshProducts, 15000);
+    const interval = setInterval(() => {
+      refreshProducts();
+      refreshCategories();
+    }, 15000);
 
     return () => {
       clearInterval(interval);
@@ -176,7 +228,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         eventSource.close();
       }
     };
-  }, [refreshProducts]);
+  }, [refreshProducts, refreshCategories]);
 
   // 3. Orders (STRICT: Real orders only, 0 initially!)
   const [orders, setOrders] = useState<Order[]>(() => {
@@ -322,7 +374,107 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [lastPlacedOrder, setLastPlacedOrder] = useState<Order | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('সকল (All)');
+  const [selectedCategory, setSelectedCategory] = useState<string>('সকল');
+
+  const handleSetSelectedCategory = (cat: string) => {
+    setSelectedCategory(cat);
+    setSelectedSubCategory(null);
+  };
+
+  // Category Actions (Real Backend Database + SSE)
+  const addCategory = async (catData: Omit<CategoryItem, 'id' | 'createdAt'>): Promise<CategoryItem> => {
+    try {
+      const res = await fetch('/api/categories', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(catData),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to add category');
+      }
+      const created: CategoryItem = await res.json();
+      setCategories((prev) => [...prev, created]);
+      return created;
+    } catch {
+      const fallback: CategoryItem = {
+        ...catData,
+        id: `cat-${Date.now()}`,
+        createdAt: new Date().toISOString(),
+      };
+      setCategories((prev) => [...prev, fallback]);
+      return fallback;
+    }
+  };
+
+  const updateCategory = async (id: string, updated: Partial<CategoryItem>): Promise<CategoryItem | null> => {
+    try {
+      const res = await fetch(`/api/categories/${id}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(updated),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to update category');
+      }
+      const saved: CategoryItem = await res.json();
+      setCategories((prev) => prev.map((c) => (c.id === id ? saved : c)));
+      return saved;
+    } catch {
+      setCategories((prev) => prev.map((c) => (c.id === id ? { ...c, ...updated } : c)));
+      return null;
+    }
+  };
+
+  const deleteCategory = async (id: string, force = false): Promise<{ success: boolean; productCount?: number; message?: string }> => {
+    try {
+      const res = await fetch(`/api/categories/${id}?force=${force}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return data;
+      }
+      setCategories((prev) => prev.filter((c) => c.id !== id));
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, message: e.message || 'ক্যাটাগরি মুছতে সমস্যা হয়েছে।' };
+    }
+  };
+
+  const reorderCategories = async (orderedIds: string[]): Promise<void> => {
+    try {
+      const res = await fetch('/api/categories/reorder', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ orderedIds }),
+      });
+      if (res.ok) {
+        const reordered = await res.json();
+        if (Array.isArray(reordered)) {
+          setCategories(reordered);
+        }
+      }
+    } catch (e) {
+      console.warn('Reorder categories error', e);
+    }
+  };
+
+  const suggestCategory = async (name: string, description = ''): Promise<{ category: string; subCategory?: string; confidence: number; reasoning: string }> => {
+    try {
+      const res = await fetch('/api/categories/suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, description }),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch {}
+    return { category: 'অন্যান্য', confidence: 0.5, reasoning: 'সাধারণ ক্যাটাগরি' };
+  };
 
   // Product Actions (Real Backend Database + Storage)
   const addProduct = async (newProdData: Omit<Product, 'id' | 'createdAt'>): Promise<Product> => {
@@ -809,7 +961,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         searchQuery,
         setSearchQuery,
         selectedCategory,
-        setSelectedCategory,
+        setSelectedCategory: handleSetSelectedCategory,
+        selectedSubCategory,
+        setSelectedSubCategory,
+        categories,
+        addCategory,
+        updateCategory,
+        deleteCategory,
+        reorderCategories,
+        suggestCategory,
+        refreshCategories,
       }}
     >
       {children}

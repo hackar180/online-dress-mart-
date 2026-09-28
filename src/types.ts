@@ -3,15 +3,40 @@ export type OrderStatus = 'Pending' | 'Confirmed' | 'Processing' | 'Shipped' | '
 export type ComplaintStatus = 'New' | 'Reviewing' | 'Processing' | 'Resolved' | 'Closed';
 
 export type ProductCategory = 
-  | 'শাড়ি (Saree)' 
-  | 'থ্রি-পিস (Three Piece)' 
-  | 'জামা ও কুর্তি (Kameez & Kurti)' 
-  | 'লেহেঙ্গা (Lehenga)' 
-  | 'গাউন (Gown)' 
-  | 'পাঞ্জাবি (Panjabi)'
-  | 'বোরকা ও হিজাব (Abaya & Borka)'
-  | 'অন্যান্য পোশাক (Other Dresses)'
-  | 'এক্সক্লুসিভ পার্টি ড্রেস (Party Dress)';
+  | 'শাড়ি' 
+  | 'থ্রি-পিস' 
+  | 'টি-শার্ট' 
+  | 'গেঞ্জি' 
+  | 'ছেলেদের পোশাক' 
+  | 'কসমেটিকস' 
+  | 'চুড়ি' 
+  | 'জুয়েলারি' 
+  | 'অন্যান্য'
+  | string;
+
+export interface CategoryItem {
+  id: string;
+  name: string; // e.g. "শাড়ি"
+  englishName?: string; // e.g. "Saree"
+  description?: string;
+  image?: string;
+  subCategories: string[]; // e.g. ['জামদানি', 'কাতান', 'সিল্ক', 'কটন']
+  order: number;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface FilterCriteria {
+  category: string;
+  subCategory?: string;
+  minPrice: number;
+  maxPrice: number;
+  colors: string[];
+  sizes: string[];
+  discountOnly: boolean;
+  inStockOnly: boolean;
+  minRating: number;
+}
 
 export interface Product {
   id: string;
@@ -23,8 +48,13 @@ export interface Product {
   stock: number;
   sizes: string[];
   colors: string[];
-  category: ProductCategory;
+  category: string;
+  subCategory?: string;
   images: string[];
+  tags?: string[];
+  rating?: number;
+  ratingCount?: number;
+  salesCount?: number;
   isFeatured?: boolean;
   isNewArrival?: boolean;
   isPopular?: boolean;

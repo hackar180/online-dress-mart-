@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useStore } from '../context/StoreContext';
 import { 
   X, ShieldCheck, Lock, Package, ShoppingCart, Plus, Edit2, 
-  Trash2, Eye, CheckCircle2, AlertTriangle, Megaphone, HelpCircle, 
-  Upload, Search, DollarSign, Users, ChevronRight, RefreshCw, LogOut, KeyRound, Filter
+  Trash2, Eye, EyeOff, CheckCircle2, AlertTriangle, Megaphone, HelpCircle, 
+  Upload, Search, DollarSign, Users, ChevronRight, RefreshCw, LogOut, KeyRound, Filter,
+  Layers, Sparkles, ArrowUp, ArrowDown, Check, Tag, FolderPlus
 } from 'lucide-react';
-import { Product, ProductCategory, OrderStatus, Order, ComplaintStatus } from '../types';
+import { Product, ProductCategory, OrderStatus, Order, ComplaintStatus, CategoryItem } from '../types';
 
 interface AdminPanelProps {
   isOpen: boolean;
@@ -28,7 +29,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
     updateComplaintStatus, 
     announcements, 
     addAnnouncement, 
-    deleteAnnouncement 
+    deleteAnnouncement,
+    categories,
+    addCategory,
+    updateCategory,
+    deleteCategory,
+    reorderCategories,
+    suggestCategory,
   } = useStore();
 
   // Admin Login state (Zero hardcoded password!)
@@ -36,8 +43,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
   const [authError, setAuthError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  // Active Admin Tab: 'dashboard' | 'products' | 'orders' | 'complaints' | 'announcements'
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'orders' | 'complaints' | 'announcements'>('products');
+  // Active Admin Tab: 'dashboard' | 'products' | 'categories' | 'orders' | 'complaints' | 'announcements'
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'categories' | 'orders' | 'complaints' | 'announcements'>('products');
 
   // Product Management Filters & Search
   const [productSearch, setProductSearch] = useState('');
@@ -56,12 +63,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
   const [prodPrice, setProdPrice] = useState<number>(0);
   const [prodDiscountPrice, setProdDiscountPrice] = useState<number | undefined>(undefined);
   const [prodStock, setProdStock] = useState<number>(10);
-  const [prodCategory, setProdCategory] = useState<ProductCategory>('থ্রি-পিস (Three Piece)');
+  const [prodCategory, setProdCategory] = useState<string>('শাড়ি');
+  const [prodSubCategory, setProdSubCategory] = useState<string>('');
+  const [prodTags, setProdTags] = useState<string>('');
   const [prodSizes, setProdSizes] = useState<string>('M, L, XL, XXL');
   const [prodColors, setProdColors] = useState<string>('মেরুন, ব্লু, গোল্ড');
   const [prodImages, setProdImages] = useState<string[]>([]);
   const [newImageUrl, setNewImageUrl] = useState('');
   const [isSavingProduct, setIsSavingProduct] = useState(false);
+
+  // AI Classification Suggestion State
+  const [aiSuggestion, setAiSuggestion] = useState<{ category: string; subCategory?: string; confidence: number; reasoning: string } | null>(null);
+  const [isSuggesting, setIsSuggesting] = useState(false);
+
+  // Category Management Modal & Actions State
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [catName, setCatName] = useState('');
+  const [catEnglishName, setCatEnglishName] = useState('');
+  const [catDescription, setCatDescription] = useState('');
+  const [catImage, setCatImage] = useState('/logo.jpg');
+  const [catSubCategories, setCatSubCategories] = useState<string[]>([]);
+  const [newSubCatInput, setNewSubCatInput] = useState('');
+  const [catOrder, setCatOrder] = useState<number>(1);
+  const [catIsActive, setCatIsActive] = useState<boolean>(true);
+  const [isSavingCategory, setIsSavingCategory] = useState(false);
+
+  // Category Delete with Product Count Confirmation
+  const [categoryToDelete, setCategoryToDelete] = useState<CategoryItem | null>(null);
+  const [isDeletingCategory, setIsDeletingCategory] = useState(false);
 
   // Delete Confirmation State
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
@@ -128,7 +158,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
 
   // Filtered Products for Management Section
   const filteredProductsList = products.filter((p) => {
-    const matchesCategory = productCategoryFilter === 'All' || p.category === productCategoryFilter;
+    const matchesCategory = productCategoryFilter === 'All' || 
+      (p.category && p.category.trim() === productCategoryFilter.trim());
     const query = productSearch.toLowerCase().trim();
     const matchesSearch = !query || 
       p.name.toLowerCase().includes(query) || 
@@ -153,9 +184,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
     setProdDiscountPrice(prod.discountPrice);
     setProdStock(prod.stock);
     setProdCategory(prod.category);
+    setProdSubCategory(prod.subCategory || '');
+    setProdTags(prod.tags ? prod.tags.join(', ') : '');
     setProdSizes(prod.sizes.join(', '));
     setProdColors(prod.colors.join(', '));
     setProdImages(prod.images || ['/logo.jpg']);
+    setAiSuggestion(null);
     setIsProductModalOpen(true);
   };
 
@@ -168,11 +202,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
     setProdPrice(2500);
     setProdDiscountPrice(1950);
     setProdStock(15);
-    setProdCategory('থ্রি-পিস (Three Piece)');
+    const defaultCat = categories.length > 0 ? categories[0].name : 'শাড়ি';
+    setProdCategory(defaultCat);
+    const matchedObj = categories.find((c) => c.name === defaultCat);
+    setProdSubCategory(matchedObj?.subCategories?.[0] || '');
+    setProdTags('');
     setProdSizes('M, L, XL, XXL');
     setProdColors('মেরুন, ব্লু, গোল্ড');
     setProdImages([]);
+    setAiSuggestion(null);
     setIsProductModalOpen(true);
+  };
+
+  // Request Smart AI Category Classification Suggestion
+  const handleRequestAiSuggestion = async () => {
+    const textToAnalyze = `${prodBengaliName} ${prodName}`.trim();
+    if (!textToAnalyze) return;
+    setIsSuggesting(true);
+    try {
+      const res = await suggestCategory(textToAnalyze, prodDescription);
+      setAiSuggestion(res);
+    } catch (err) {
+      console.error('Failed to get AI category suggestion:', err);
+    } finally {
+      setIsSuggesting(false);
+    }
   };
 
   // Handle local image file upload directly from device (phone/PC)
@@ -206,6 +260,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
     setIsSavingProduct(true);
     const parsedSizes = prodSizes.split(',').map((s) => s.trim()).filter(Boolean);
     const parsedColors = prodColors.split(',').map((c) => c.trim()).filter(Boolean);
+    const parsedTags = prodTags.split(',').map((t) => t.trim()).filter(Boolean);
 
     const productPayload = {
       name: prodName,
@@ -215,6 +270,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
       discountPrice: prodDiscountPrice ? Number(prodDiscountPrice) : undefined,
       stock: Number(prodStock),
       category: prodCategory,
+      subCategory: prodSubCategory ? prodSubCategory.trim() : undefined,
+      tags: parsedTags.length > 0 ? parsedTags : undefined,
       sizes: parsedSizes.length > 0 ? parsedSizes : ['Standard'],
       colors: parsedColors.length > 0 ? parsedColors : ['Standard'],
       images: prodImages.length > 0 ? prodImages : ['/logo.jpg'],
@@ -229,6 +286,109 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
 
     setIsSavingProduct(false);
     setIsProductModalOpen(false);
+  };
+
+  // Category Management Handlers
+  const handleOpenAddCategory = () => {
+    setEditingCategoryId(null);
+    setCatName('');
+    setCatEnglishName('');
+    setCatDescription('');
+    setCatImage('/logo.jpg');
+    setCatSubCategories([]);
+    setNewSubCatInput('');
+    setCatOrder((categories.length || 0) + 1);
+    setCatIsActive(true);
+    setIsCategoryModalOpen(true);
+  };
+
+  const handleEditCategory = (cat: CategoryItem) => {
+    setEditingCategoryId(cat.id);
+    setCatName(cat.name);
+    setCatEnglishName(cat.englishName || '');
+    setCatDescription(cat.description || '');
+    setCatImage(cat.image || '/logo.jpg');
+    setCatSubCategories([...(cat.subCategories || [])]);
+    setNewSubCatInput('');
+    setCatOrder(cat.order);
+    setCatIsActive(cat.isActive !== false);
+    setIsCategoryModalOpen(true);
+  };
+
+  const handleSaveCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!catName.trim()) return;
+    setIsSavingCategory(true);
+    try {
+      if (editingCategoryId) {
+        await updateCategory(editingCategoryId, {
+          name: catName.trim(),
+          englishName: catEnglishName.trim() || undefined,
+          description: catDescription.trim() || undefined,
+          image: catImage.trim() || '/logo.jpg',
+          subCategories: catSubCategories,
+          order: Number(catOrder) || 1,
+          isActive: catIsActive,
+        });
+      } else {
+        await addCategory({
+          name: catName.trim(),
+          englishName: catEnglishName.trim() || undefined,
+          description: catDescription.trim() || undefined,
+          image: catImage.trim() || '/logo.jpg',
+          subCategories: catSubCategories,
+          order: Number(catOrder) || 1,
+          isActive: catIsActive,
+        });
+      }
+      setIsCategoryModalOpen(false);
+    } catch (err) {
+      console.error('Save category error:', err);
+    } finally {
+      setIsSavingCategory(false);
+    }
+  };
+
+  const handleConfirmDeleteCategory = async () => {
+    if (!categoryToDelete) return;
+    setIsDeletingCategory(true);
+    try {
+      await deleteCategory(categoryToDelete.id, true);
+      setDeleteSuccessMessage(`"${categoryToDelete.name}" ক্যাটাগরি সফলভাবে ডাটাবেজ থেকে মুছে ফেলা হয়েছে!`);
+      setTimeout(() => setDeleteSuccessMessage(''), 3500);
+      setCategoryToDelete(null);
+    } catch (err) {
+      console.error('Delete category error:', err);
+    } finally {
+      setIsDeletingCategory(false);
+    }
+  };
+
+  const handleMoveCategoryOrder = async (index: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= categories.length) return;
+    const newOrder = [...categories];
+    const temp = newOrder[index];
+    newOrder[index] = newOrder[targetIndex];
+    newOrder[targetIndex] = temp;
+    await reorderCategories(newOrder.map((c) => c.id));
+  };
+
+  const handleToggleCategoryActive = async (cat: CategoryItem) => {
+    await updateCategory(cat.id, { isActive: !cat.isActive });
+  };
+
+  const handleAddSubCategoryTag = () => {
+    if (!newSubCatInput.trim()) return;
+    const tag = newSubCatInput.trim();
+    if (!catSubCategories.includes(tag)) {
+      setCatSubCategories([...catSubCategories, tag]);
+    }
+    setNewSubCatInput('');
+  };
+
+  const handleRemoveSubCategoryTag = (tagToRemove: string) => {
+    setCatSubCategories(catSubCategories.filter((t) => t !== tagToRemove));
   };
 
   // Confirm and Execute Real Database & Storage Product Delete
@@ -260,17 +420,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
     setAnnContent('');
   };
 
-  const categoriesList: ProductCategory[] = [
-    'থ্রি-পিস (Three Piece)',
-    'শাড়ি (Saree)',
-    'জামা ও কুর্তি (Kameez & Kurti)',
-    'লেহেঙ্গা (Lehenga)',
-    'গাউন (Gown)',
-    'পাঞ্জাবি (Panjabi)',
-    'বোরকা ও হিজাব (Abaya & Borka)',
-    'অন্যান্য পোশাক (Other Dresses)',
-    'এক্সক্লুসিভ পার্টি ড্রেস (Party Dress)'
-  ];
+  const categoriesList: string[] = useMemo(() => {
+    if (categories && categories.length > 0) {
+      return categories.map((c) => c.name);
+    }
+    return [
+      'শাড়ি',
+      'থ্রি-পিস',
+      'টি-শার্ট',
+      'গেঞ্জি',
+      'ছেলেদের পোশাক',
+      'কসমেটিকস',
+      'চুড়ি',
+      'জুয়েলারি',
+      'অন্যান্য'
+    ];
+  }, [categories]);
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/90 backdrop-blur-xl flex items-center justify-center p-2 sm:p-4 md:p-6">
@@ -407,6 +572,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
                   activeTab === 'products' ? 'bg-stone-950 text-amber-300' : 'bg-gray-800 text-gray-300'
                 }`}>
                   {products.length}
+                </span>
+              </button>
+
+              {/* Category & Sub-Category Control Tab */}
+              <button
+                type="button"
+                onClick={() => setActiveTab('categories')}
+                className={`flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+                  activeTab === 'categories'
+                    ? 'bg-amber-500 text-stone-950 font-bold shadow'
+                    : 'text-gray-300 hover:bg-[#181a26]'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Layers className="w-4 h-4" />
+                  <span>ক্যাটাগরি ও সাব-ক্যাটাগরি</span>
+                </div>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                  activeTab === 'categories' ? 'bg-stone-950 text-amber-300' : 'bg-gray-800 text-gray-300'
+                }`}>
+                  {categories.length}
                 </span>
               </button>
 
@@ -617,6 +803,187 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
                               <button
                                 type="button"
                                 onClick={() => setProductToDelete(p)}
+                                className="px-3 py-1.5 rounded-xl bg-rose-950/60 hover:bg-rose-900 border border-rose-500/40 text-rose-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Delete</span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB: CATEGORY & SUB-CATEGORY MANAGEMENT */}
+              {activeTab === 'categories' && (
+                <div className="space-y-4">
+                  {/* Action Bar */}
+                  <div className="p-4 rounded-2xl bg-[#12141e] border border-amber-500/25 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-lg">
+                    <div>
+                      <h4 className="font-bold text-base text-white flex items-center gap-2">
+                        <Layers className="w-5 h-5 text-amber-400" />
+                        <span>ক্যাটাগরি ও সাব-ক্যাটাগরি কন্ট্রোল (Real Database)</span>
+                      </h4>
+                      <p className="text-xs text-gray-400">
+                        ক্যাটাগরি তৈরি, নাম ও ছবি পরিবর্তন, সাব-ক্যাটাগরি পরিচালনা, ক্রম পরিবর্তন এবং শো/হাইড করুন
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleOpenAddCategory}
+                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 via-amber-500 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-stone-950 font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-[0_4px_15px_rgba(217,119,6,0.35)] transition cursor-pointer shrink-0"
+                    >
+                      <Plus className="w-4 h-4 stroke-[3]" />
+                      <span>+ নতুন ক্যাটাগরি তৈরি করুন</span>
+                    </button>
+                  </div>
+
+                  {/* Categories Grid */}
+                  {categories.length === 0 ? (
+                    <div className="p-12 text-center bg-[#131520] rounded-2xl border border-gray-800">
+                      <Layers className="w-12 h-12 text-gray-600 mx-auto mb-3" />
+                      <p className="text-gray-400 text-sm">কোনো ক্যাটাগরি পাওয়া যায়নি।</p>
+                      <button
+                        type="button"
+                        onClick={handleOpenAddCategory}
+                        className="mt-4 px-4 py-2 bg-amber-500 text-stone-950 font-bold text-xs rounded-xl"
+                      >
+                        প্রথম ক্যাটাগরি তৈরি করুন
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-3">
+                      {categories.map((cat, index) => {
+                        const prodCount = products.filter((p) => p.category && p.category.trim() === cat.name.trim()).length;
+                        return (
+                          <div
+                            key={cat.id}
+                            className={`p-4 rounded-2xl bg-[#12141e] border transition flex flex-col md:flex-row md:items-center justify-between gap-4 ${
+                              cat.isActive !== false ? 'border-amber-500/20' : 'border-gray-800 opacity-60'
+                            }`}
+                          >
+                            {/* Left: Info */}
+                            <div className="flex items-start gap-3.5 flex-1 min-w-0">
+                              {/* Order Badge */}
+                              <div className="w-7 h-7 rounded-lg bg-stone-900 border border-amber-500/30 flex items-center justify-center text-amber-400 font-mono text-xs font-bold shrink-0">
+                                {index + 1}
+                              </div>
+
+                              {/* Image Preview */}
+                              <div className="w-12 h-12 rounded-xl bg-black/40 border border-gray-800 overflow-hidden shrink-0">
+                                <img
+                                  src={cat.image || '/logo.jpg'}
+                                  alt={cat.name}
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+
+                              {/* Title & Details */}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h5 className="font-bold text-sm text-white">{cat.name}</h5>
+                                  {cat.englishName && (
+                                    <span className="text-xs text-gray-400 font-mono">({cat.englishName})</span>
+                                  )}
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                                    {prodCount} টি প্রোডাক্ট
+                                  </span>
+                                  {cat.isActive === false && (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                                      লুকানো (Hidden)
+                                    </span>
+                                  )}
+                                </div>
+
+                                {cat.description && (
+                                  <p className="text-xs text-gray-400 mt-1 line-clamp-1">{cat.description}</p>
+                                )}
+
+                                {/* Subcategories */}
+                                <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                                  <span className="text-[11px] text-gray-400 font-medium">সাব-ক্যাটাগরি:</span>
+                                  {cat.subCategories && cat.subCategories.length > 0 ? (
+                                    cat.subCategories.map((sub) => (
+                                      <span
+                                        key={sub}
+                                        className="px-2 py-0.5 rounded-md bg-[#1a1c2c] border border-amber-500/25 text-amber-300 text-[11px]"
+                                      >
+                                        {sub}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="text-[11px] text-gray-500 italic">সাব-ক্যাটাগরি যুক্ত করা হয়নি</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Right: Actions */}
+                            <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                              {/* Order controls */}
+                              <div className="flex items-center gap-1 bg-[#181a26] p-1 rounded-xl border border-gray-800">
+                                <button
+                                  type="button"
+                                  onClick={() => handleMoveCategoryOrder(index, 'up')}
+                                  disabled={index === 0}
+                                  className="p-1.5 text-gray-400 hover:text-amber-400 disabled:opacity-30 disabled:hover:text-gray-400 transition cursor-pointer"
+                                  title="উপরে নিন"
+                                >
+                                  <ArrowUp className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleMoveCategoryOrder(index, 'down')}
+                                  disabled={index === categories.length - 1}
+                                  className="p-1.5 text-gray-400 hover:text-amber-400 disabled:opacity-30 disabled:hover:text-gray-400 transition cursor-pointer"
+                                  title="নিচে নিন"
+                                >
+                                  <ArrowDown className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+
+                              {/* Show / Hide Toggle */}
+                              <button
+                                type="button"
+                                onClick={() => handleToggleCategoryActive(cat)}
+                                className={`p-2 rounded-xl border text-xs font-semibold flex items-center gap-1 transition cursor-pointer ${
+                                  cat.isActive !== false
+                                    ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40 hover:bg-emerald-900'
+                                    : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'
+                                }`}
+                                title={cat.isActive !== false ? 'গ্রাহকদের দেখানো হচ্ছে' : 'লুকানো রয়েছে'}
+                              >
+                                {cat.isActive !== false ? (
+                                  <>
+                                    <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                                    <span className="hidden sm:inline">Active</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <EyeOff className="w-3.5 h-3.5 text-gray-400" />
+                                    <span className="hidden sm:inline">Hidden</span>
+                                  </>
+                                )}
+                              </button>
+
+                              {/* Edit Button */}
+                              <button
+                                type="button"
+                                onClick={() => handleEditCategory(cat)}
+                                className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                                <span>Edit</span>
+                              </button>
+
+                              {/* Delete Button */}
+                              <button
+                                type="button"
+                                onClick={() => setCategoryToDelete(cat)}
                                 className="px-3 py-1.5 rounded-xl bg-rose-950/60 hover:bg-rose-900 border border-rose-500/40 text-rose-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -1042,17 +1409,129 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-gray-300 font-semibold mb-1">ক্যাটাগরি *</label>
-                <select
-                  value={prodCategory}
-                  onChange={(e) => setProdCategory(e.target.value as ProductCategory)}
-                  className="w-full bg-[#1b1d2c] border border-amber-500/20 focus:border-amber-400 rounded-xl px-3 py-2 text-white cursor-pointer"
-                >
-                  {categoriesList.map((cat) => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                </select>
+              {/* Category & Sub-Category with Smart AI Assist */}
+              <div className="space-y-2.5 p-3 rounded-2xl bg-[#171926] border border-amber-500/20">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <Layers className="w-4 h-4 text-amber-400" />
+                    <span className="font-bold text-amber-300">ক্যাটাগরি ও সাব-ক্যাটাগরি নির্বাচন</span>
+                  </div>
+
+                  {/* AI Suggestion Button */}
+                  <button
+                    type="button"
+                    onClick={handleRequestAiSuggestion}
+                    disabled={isSuggesting || (!prodBengaliName && !prodName)}
+                    className="px-3 py-1 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-40 self-start sm:self-auto"
+                    title="নাম ও বিবরণ অনুযায়ী স্মার্ট AI ক্যাটাগরি পরামর্শ নিন"
+                  >
+                    <Sparkles className={`w-3.5 h-3.5 text-amber-400 ${isSuggesting ? 'animate-spin' : ''}`} />
+                    <span>{isSuggesting ? 'AI বিশ্লেষণ করছে...' : '✨ AI ক্যাটাগরি পরামর্শ'}</span>
+                  </button>
+                </div>
+
+                {/* AI Suggestion Banner if available */}
+                {aiSuggestion && (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-400/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 animate-fade-in">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-amber-300 font-bold">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse shrink-0" />
+                        <span>AI প্রস্তাব:</span>
+                        <span className="text-white bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/30">
+                          {aiSuggestion.category}
+                        </span>
+                        {aiSuggestion.subCategory && (
+                          <span className="text-amber-200 bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/30">
+                            › {aiSuggestion.subCategory}
+                          </span>
+                        )}
+                        <span className="text-[10px] text-gray-400">
+                          ({Math.round(aiSuggestion.confidence * 100)}% মিল)
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-gray-400 mt-1">{aiSuggestion.reasoning}</p>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProdCategory(aiSuggestion.category);
+                          if (aiSuggestion.subCategory) {
+                            setProdSubCategory(aiSuggestion.subCategory);
+                          }
+                          setAiSuggestion(null);
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs flex items-center gap-1 cursor-pointer shadow"
+                      >
+                        <Check className="w-3 h-3" />
+                        <span>গ্রহণ করুন (Apply)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAiSuggestion(null)}
+                        className="px-2 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 text-xs cursor-pointer"
+                      >
+                        বাতিল
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-gray-300 font-semibold mb-1">মূল ক্যাটাগরি *</label>
+                    <select
+                      value={prodCategory}
+                      onChange={(e) => {
+                        const newCat = e.target.value;
+                        setProdCategory(newCat);
+                        const matchedCat = categories.find((c) => c.name === newCat);
+                        if (matchedCat && matchedCat.subCategories && matchedCat.subCategories.length > 0) {
+                          setProdSubCategory(matchedCat.subCategories[0]);
+                        } else {
+                          setProdSubCategory('');
+                        }
+                      }}
+                      className="w-full bg-[#1b1d2c] border border-amber-500/20 focus:border-amber-400 rounded-xl px-3 py-2 text-white cursor-pointer"
+                    >
+                      {categoriesList.map((cat) => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-gray-300 font-semibold mb-1">সাব-ক্যাটাগরি (Sub-Category)</label>
+                    {(() => {
+                      const matchedCat = categories.find((c) => c.name === prodCategory);
+                      const currentSubs = matchedCat?.subCategories || [];
+                      if (currentSubs.length > 0) {
+                        return (
+                          <select
+                            value={prodSubCategory}
+                            onChange={(e) => setProdSubCategory(e.target.value)}
+                            className="w-full bg-[#1b1d2c] border border-amber-500/20 focus:border-amber-400 rounded-xl px-3 py-2 text-white cursor-pointer"
+                          >
+                            <option value="">-- সাব-ক্যাটাগরি নির্বাচন করুন (ঐচ্ছিক) --</option>
+                            {currentSubs.map((sub) => (
+                              <option key={sub} value={sub}>{sub}</option>
+                            ))}
+                          </select>
+                        );
+                      }
+                      return (
+                        <input
+                          type="text"
+                          value={prodSubCategory}
+                          onChange={(e) => setProdSubCategory(e.target.value)}
+                          placeholder="যেমন: জামদানি, কাতান, কটন..."
+                          className="w-full bg-[#1b1d2c] border border-amber-500/20 focus:border-amber-400 rounded-xl px-3 py-2 text-white"
+                        />
+                      );
+                    })()}
+                  </div>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1119,6 +1598,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
                   value={prodDescription}
                   onChange={(e) => setProdDescription(e.target.value)}
                   placeholder="পোশাকের কাপড়, কারুকাজ, ম্যাচিং ও কোয়ালিটি সম্পর্কিত বিস্তারিত লিখুন..."
+                  className="w-full bg-[#1b1d2c] border border-amber-500/20 focus:border-amber-400 rounded-xl px-3 py-2 text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-gray-300 font-semibold mb-1">ট্যাগসমূহ (Tags - কমা দিয়ে লিখুন)</label>
+                <input
+                  type="text"
+                  value={prodTags}
+                  onChange={(e) => setProdTags(e.target.value)}
+                  placeholder="যেমন: জামদানি, সিল্ক, পার্টি ওয়্যার, প্রিমিয়াম, নতুন"
                   className="w-full bg-[#1b1d2c] border border-amber-500/20 focus:border-amber-400 rounded-xl px-3 py-2 text-white"
                 />
               </div>
@@ -1384,6 +1874,242 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
           </div>
         </div>
       )}
+
+      {/* 5. CATEGORY ADD / EDIT MODAL */}
+      {isCategoryModalOpen && (
+        <div className="fixed inset-0 z-70 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+          <div className="relative w-full max-w-xl bg-[#131520] border border-amber-500/40 rounded-3xl p-5 sm:p-7 shadow-2xl text-gray-100 my-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-800 mb-4">
+              <h4 className="font-bold text-base text-white flex items-center gap-2">
+                <Layers className="w-4 h-4 text-amber-400" />
+                <span>{editingCategoryId ? 'ক্যাটাগরি সম্পাদনা করুন' : 'নতুন ক্যাটাগরি তৈরি করুন'}</span>
+              </h4>
+              <button
+                onClick={() => setIsCategoryModalOpen(false)}
+                className="p-1 text-gray-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCategory} className="space-y-4 max-h-[75vh] overflow-y-auto pr-1 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-gray-300 font-semibold mb-1">ক্যাটাগরির বাংলা নাম *</label>
+                  <input
+                    type="text"
+                    required
+                    value={catName}
+                    onChange={(e) => setCatName(e.target.value)}
+                    placeholder="যেমন: শাড়ি, থ্রি-পিস, জুয়েলারি..."
+                    className="w-full bg-[#1b1d2c] border border-amber-500/20 focus:border-amber-400 rounded-xl px-3 py-2 text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-gray-300 font-semibold mb-1">ইংরেজি নাম (English Name)</label>
+                  <input
+                    type="text"
+                    value={catEnglishName}
+                    onChange={(e) => setCatEnglishName(e.target.value)}
+                    placeholder="e.g. Saree, Three-Piece, Jewelry..."
+                    className="w-full bg-[#1b1d2c] border border-amber-500/20 focus:border-amber-400 rounded-xl px-3 py-2 text-white"
+                  />
+                </div>
+              </div>
+
+              {/* Category Image */}
+              <div>
+                <label className="block text-gray-300 font-semibold mb-1">ক্যাটাগরি ছবি URL</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={catImage}
+                    onChange={(e) => setCatImage(e.target.value)}
+                    placeholder="https://... অথবা /logo.jpg"
+                    className="flex-1 bg-[#1b1d2c] border border-amber-500/20 focus:border-amber-400 rounded-xl px-3 py-2 text-white"
+                  />
+                  {catImage && (
+                    <div className="w-9 h-9 rounded-lg bg-black border border-gray-700 overflow-hidden shrink-0">
+                      <img src={catImage} alt="preview" className="w-full h-full object-cover" />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Sub-Categories Manager */}
+              <div className="p-3 rounded-2xl bg-[#171926] border border-amber-500/20 space-y-2">
+                <label className="block text-amber-300 font-bold">
+                  সাব-ক্যাটাগরি পরিচালনা (Sub-Categories)
+                </label>
+                <p className="text-[11px] text-gray-400">
+                  এই ক্যাটাগরির অন্তর্ভুক্ত সাব-ক্যাটাগরিগুলো যুক্ত করুন (যেমন: শাড়ির ক্ষেত্রে জামদানি, কাতান, সিল্ক, কটন):
+                </p>
+
+                {/* Subcategory Chips */}
+                <div className="flex flex-wrap gap-1.5 min-h-[32px] p-2 rounded-xl bg-[#12131d] border border-gray-800">
+                  {catSubCategories.length === 0 ? (
+                    <span className="text-[11px] text-gray-500 italic">কোনো সাব-ক্যাটাগরি এখনো যোগ করা হয়নি</span>
+                  ) : (
+                    catSubCategories.map((sub) => (
+                      <span
+                        key={sub}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-200 text-xs"
+                      >
+                        <span>{sub}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveSubCategoryTag(sub)}
+                          className="hover:text-rose-400 cursor-pointer ml-0.5"
+                          title="মুছে ফেলুন"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))
+                  )}
+                </div>
+
+                {/* Add Subcategory input */}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newSubCatInput}
+                    onChange={(e) => setNewSubCatInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddSubCategoryTag();
+                      }
+                    }}
+                    placeholder="সাব-ক্যাটাগরির নাম লিখে যোগ করুন (যেমন: জামদানি)"
+                    className="flex-1 bg-[#1b1d2c] border border-gray-700 focus:border-amber-400 rounded-xl px-3 py-2 text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddSubCategoryTag}
+                    className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs cursor-pointer shadow shrink-0"
+                  >
+                    + যোগ করুন
+                  </button>
+                </div>
+              </div>
+
+              {/* Order & Display Status */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+                <div>
+                  <label className="block text-gray-300 font-semibold mb-1">প্রদর্শনের ক্রম (Order)</label>
+                  <input
+                    type="number"
+                    value={catOrder}
+                    onChange={(e) => setCatOrder(Number(e.target.value))}
+                    min={1}
+                    className="w-full bg-[#1b1d2c] border border-amber-500/20 focus:border-amber-400 rounded-xl px-3 py-2 text-white"
+                  />
+                </div>
+                <div className="pt-5">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs text-gray-200">
+                    <input
+                      type="checkbox"
+                      checked={catIsActive}
+                      onChange={(e) => setCatIsActive(e.target.checked)}
+                      className="w-4 h-4 rounded accent-amber-500 cursor-pointer"
+                    />
+                    <span className="font-semibold">গ্রাহকদের জন্য সক্রিয় রাখুন (Show to customers)</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Description */}
+              <div>
+                <label className="block text-gray-300 font-semibold mb-1">সংক্ষিপ্ত বিবরণ (ঐচ্ছিক)</label>
+                <textarea
+                  rows={2}
+                  value={catDescription}
+                  onChange={(e) => setCatDescription(e.target.value)}
+                  placeholder="এই ক্যাটাগরির পোশাকের বর্ণনা..."
+                  className="w-full bg-[#1b1d2c] border border-amber-500/20 focus:border-amber-400 rounded-xl px-3 py-2 text-white"
+                />
+              </div>
+
+              {/* Modal Buttons */}
+              <div className="pt-3 border-t border-gray-800 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCategoryModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-gray-800 text-gray-300 text-xs font-semibold cursor-pointer"
+                >
+                  বাতিল
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingCategory}
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-600 via-amber-500 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-stone-950 font-bold text-xs shadow-[0_4px_15px_rgba(217,119,6,0.35)] transition cursor-pointer disabled:opacity-50"
+                >
+                  {isSavingCategory ? 'সংরক্ষণ হচ্ছে...' : editingCategoryId ? 'আপডেট করুন' : 'ক্যাটাগরি তৈরি করুন'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 6. CATEGORY DELETE CONFIRMATION MODAL */}
+      {categoryToDelete && (() => {
+        const productCount = products.filter(
+          (p) => p.category && p.category.trim() === categoryToDelete.name.trim()
+        ).length;
+
+        return (
+          <div className="fixed inset-0 z-70 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6">
+            <div className="relative w-full max-w-md bg-[#131520] border border-rose-500/40 rounded-3xl p-6 shadow-2xl text-gray-100 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-base text-white">ক্যাটাগরি মুছে ফেলার নিশ্চয়তা</h4>
+                  <p className="text-xs text-rose-300 font-semibold font-mono">{categoryToDelete.name}</p>
+                </div>
+              </div>
+
+              {productCount > 0 ? (
+                <div className="p-3.5 rounded-2xl bg-rose-950/70 border border-rose-500/40 text-xs text-rose-200 space-y-2">
+                  <p className="font-bold flex items-center gap-1.5 text-rose-300">
+                    <span>⚠️ সতর্কতা:</span>
+                    <span>এই ক্যাটাগরিতে {productCount} টি সক্রিয় প্রোডাক্ট রয়েছে!</span>
+                  </p>
+                  <p className="text-gray-300 text-[11px] leading-relaxed">
+                    এই ক্যাটাগরি মুছে ফেললে সংশ্লিষ্ট প্রোডাক্টগুলো স্থায়ীভাবে মুছে যাবে না, তবে তাদের ক্যাটাগরি 'অন্যান্য'-তে চলে যাবে। আপনি কি নিশ্চিতভাবে এটি মুছে ফেলতে চান?
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-300">
+                  আপনি কি নিশ্চিতভাবে <strong>"{categoryToDelete.name}"</strong> ক্যাটাগরি ডাটাবেজ থেকে মুছে ফেলতে চান?
+                </p>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-gray-800">
+                <button
+                  type="button"
+                  disabled={isDeletingCategory}
+                  onClick={() => setCategoryToDelete(null)}
+                  className="px-4 py-2 rounded-xl bg-gray-800 text-gray-300 text-xs font-semibold cursor-pointer"
+                >
+                  বাতিল
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingCategory}
+                  onClick={handleConfirmDeleteCategory}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition cursor-pointer disabled:opacity-50"
+                >
+                  {isDeletingCategory ? 'মুছে ফেলা হচ্ছে...' : 'হ্যাঁ, ক্যাটাগরি মুছে ফেলুন'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );

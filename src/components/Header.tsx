@@ -21,16 +21,16 @@ export const Header: React.FC = () => {
   const [showSearchInput, setShowSearchInput] = useState(false);
 
   const categories = [
-    'সকল (All)',
-    'থ্রি-পিস (Three Piece)',
-    'শাড়ি (Saree)',
-    'জামা ও কুর্তি (Kameez & Kurti)',
-    'লেহেঙ্গা (Lehenga)',
-    'গাউন (Gown)',
-    'পাঞ্জাবি (Panjabi)',
-    'বোরকা ও হিজাব (Abaya & Borka)',
-    'অন্যান্য পোশাক (Other Dresses)',
-    'এক্সক্লুসিভ পার্টি ড্রেস (Party Dress)'
+    'সকল',
+    'শাড়ি',
+    'থ্রি-পিস',
+    'টি-শার্ট',
+    'গেঞ্জি',
+    'ছেলেদের পোশাক',
+    'কসমেটিকস',
+    'চুড়ি',
+    'জুয়েলারি',
+    'অন্যান্য'
   ];
 
   return (
@@ -103,7 +103,7 @@ export const Header: React.FC = () => {
             {/* BRANDING: Logo + Brand Name (Responsive & Never Overlapping) */}
             <div 
               onClick={() => {
-                setSelectedCategory('সকল (All)');
+                setSelectedCategory('সকল');
                 setActiveModal('none');
               }}
               className="flex items-center gap-2 sm:gap-3 cursor-pointer group shrink-0"
@@ -261,9 +261,14 @@ export const Header: React.FC = () => {
             {categories.map((cat) => (
               <button
                 key={cat}
-                onClick={() => setSelectedCategory(cat)}
+                type="button"
+                onClick={() => {
+                  setSelectedCategory(cat);
+                  const el = document.getElementById('products-section');
+                  if (el) el.scrollIntoView({ behavior: 'smooth' });
+                }}
                 className={`px-3.5 py-1.5 rounded-full text-xs font-medium tracking-wide transition-all whitespace-nowrap cursor-pointer ${
-                  selectedCategory === cat
+                  selectedCategory === cat || (cat === 'সকল' && selectedCategory === 'সকল (All)')
                     ? 'bg-amber-500/20 text-amber-300 border border-amber-400/40 shadow-[0_0_10px_rgba(217,119,6,0.25)]'
                     : 'text-gray-300 hover:text-amber-200 hover:bg-[#1a1c28]'
                 }`}
@@ -338,13 +343,16 @@ export const Header: React.FC = () => {
                 {categories.map((cat) => (
                   <button
                     key={cat}
+                    type="button"
                     onClick={() => {
                       setSelectedCategory(cat);
                       setMobileMenuOpen(false);
+                      const el = document.getElementById('products-section');
+                      if (el) el.scrollIntoView({ behavior: 'smooth' });
                     }}
                     className={`w-full text-left px-3 py-2 rounded-xl text-xs font-medium transition ${
-                      selectedCategory === cat
-                        ? 'bg-amber-500/20 text-amber-300 border border-amber-400/30'
+                      selectedCategory === cat || (cat === 'সকল' && selectedCategory === 'সকল (All)')
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-400/30 font-bold'
                         : 'text-gray-300 hover:bg-[#181924]'
                     }`}
                   >

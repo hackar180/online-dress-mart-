@@ -76,46 +76,31 @@ export const Footer: React.FC = () => {
               জনপ্রিয় ক্যাটাগরি
             </h4>
             <ul className="space-y-2 text-gray-400">
-              <li>
-                <button
-                  onClick={() => setSelectedCategory('শাড়ি (Saree)')}
-                  className="hover:text-amber-300 transition cursor-pointer"
-                >
-                  বেনারসি ও কাতান সিল্ক শাড়ি
-                </button>
-              </li>
-              <li>
-                <button
-                  onClick={() => setSelectedCategory('থ্রি-পিস (Three Piece)')}
-                  className="hover:text-amber-300 transition cursor-pointer"
-                >
-                  এক্সক্লুসিভ জর্জেট থ্রি-পিস
-                </button>
-              </li>
-              <li>
-                <button
-                  onClick={() => setSelectedCategory('লেহেঙ্গা (Lehenga)')}
-                  className="hover:text-amber-300 transition cursor-pointer"
-                >
-                  ব্রাইডাল ভেলভেট লেহেঙ্গা
-                </button>
-              </li>
-              <li>
-                <button
-                  onClick={() => setSelectedCategory('গাউন (Gown)')}
-                  className="hover:text-amber-300 transition cursor-pointer"
-                >
-                  ফ্লোর টাচ ডিজাইনার গাউন
-                </button>
-              </li>
-              <li>
-                <button
-                  onClick={() => setSelectedCategory('বোরকা ও হিজাব (Abaya & Borka)')}
-                  className="hover:text-amber-300 transition cursor-pointer"
-                >
-                  দুবাই চেরি স্টোন বোরকা
-                </button>
-              </li>
+              {[
+                'শাড়ি',
+                'থ্রি-পিস',
+                'টি-শার্ট',
+                'গেঞ্জি',
+                'ছেলেদের পোশাক',
+                'কসমেটিকস',
+                'চুড়ি',
+                'জুয়েলারি',
+                'অন্যান্য'
+              ].map((cat) => (
+                <li key={cat}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCategory(cat);
+                      const el = document.getElementById('products-section');
+                      if (el) el.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                    className="hover:text-amber-300 transition cursor-pointer text-left"
+                  >
+                    {cat}
+                  </button>
+                </li>
+              ))}
             </ul>
           </div>
 

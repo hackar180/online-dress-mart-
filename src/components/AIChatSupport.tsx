@@ -83,7 +83,7 @@ export const AIChatSupport: React.FC = () => {
 
     // 6. PRODUCT & CATEGORY INQUIRIES
     if (q.includes('শাড়ি') || q.includes('saree') || q.includes('কাতান')) {
-      const sarees = products.filter((p) => p.category === 'শাড়ি (Saree)');
+      const sarees = products.filter((p) => p.category === 'শাড়ি');
       const names = sarees.map((s) => `• ${s.bengaliName} (মূল্য: ৳${s.discountPrice || s.price})`).join('\n');
       return `আমাদের বর্তমান শাড়ি কালেকশন:\n\n${names}\n\nপণ্যগুলোর ছবি ও বিস্তারিত দেখতে ওয়েবসাইট স্ক্রল করুন এবং 'কার্টে নিন' অথবা 'অর্ডার' বাটনে চাপুন।`;
     }

@@ -80,6 +80,93 @@ async function startServer() {
     res.json({ success: true, message: result.message });
   });
 
+  // --- CATEGORIES ROUTES ---
+  // Public: Get all categories
+  app.get('/api/categories', (_req, res) => {
+    const categories = db.getCategories();
+    res.json(categories);
+  });
+
+  // Admin: Create Category
+  app.post('/api/categories', requireAdmin, (req, res) => {
+    try {
+      const { name, englishName, description, image, subCategories, order, isActive } = req.body;
+      if (!name || typeof name !== 'string') {
+        res.status(400).json({ error: 'ক্যাটাগরির নাম আবশ্যক।' });
+        return;
+      }
+      const newCat = db.addCategory({
+        name: name.trim(),
+        englishName: englishName?.trim(),
+        description: description?.trim(),
+        image: image || '/logo.jpg',
+        subCategories: Array.isArray(subCategories) ? subCategories : [],
+        order: Number(order) || 99,
+        isActive: isActive !== false,
+      });
+      res.status(201).json(newCat);
+    } catch (err: any) {
+      res.status(500).json({ error: 'ক্যাটাগরি তৈরি করা সম্ভব হয়নি।' });
+    }
+  });
+
+  // Admin: Update Category
+  app.put('/api/categories/:id', requireAdmin, (req, res) => {
+    try {
+      const { id } = req.params;
+      const updated = db.updateCategory(id, req.body);
+      if (!updated) {
+        res.status(404).json({ error: 'ক্যাটাগরি পাওয়া যায়নি।' });
+        return;
+      }
+      res.json(updated);
+    } catch {
+      res.status(500).json({ error: 'ক্যাটাগরি আপডেট করা যায়নি।' });
+    }
+  });
+
+  // Admin: Delete Category (checks if products exist)
+  app.delete('/api/categories/:id', requireAdmin, (req, res) => {
+    try {
+      const { id } = req.params;
+      const force = req.query.force === 'true';
+      const result = db.deleteCategory(id, force);
+      if (!result.success) {
+        res.status(400).json(result);
+        return;
+      }
+      res.json({ success: true, message: 'ক্যাটাগরি সফলভাবে মুছে ফেলা হয়েছে।' });
+    } catch {
+      res.status(500).json({ error: 'ক্যাটাগরি মুছতে ব্যর্থ হয়েছে।' });
+    }
+  });
+
+  // Admin: Reorder Categories
+  app.post('/api/categories/reorder', requireAdmin, (req, res) => {
+    try {
+      const { orderedIds } = req.body;
+      if (!Array.isArray(orderedIds)) {
+        res.status(400).json({ error: 'অকার্যকর ক্রম তালিকা।' });
+        return;
+      }
+      const reordered = db.reorderCategories(orderedIds);
+      res.json(reordered);
+    } catch {
+      res.status(500).json({ error: 'ক্যাটাগরি সাজানো যায়নি।' });
+    }
+  });
+
+  // Smart Category Suggestion endpoint
+  app.post('/api/categories/suggest', (req, res) => {
+    try {
+      const { name, description } = req.body;
+      const suggestion = db.suggestCategory(name || '', description || '');
+      res.json(suggestion);
+    } catch {
+      res.status(500).json({ category: 'অন্যান্য', confidence: 0.5 });
+    }
+  });
+
   // --- PRODUCTS ROUTES ---
   // Public: Get all products
   app.get('/api/products', (_req, res) => {
@@ -100,7 +187,7 @@ async function startServer() {
     db.subscribeSSE(listener);
 
     // Initial message
-    res.write(`data: ${JSON.stringify({ type: 'connected', data: db.getProducts() })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: 'connected', data: db.getProducts(), categories: db.getCategories() })}\n\n`);
 
     req.on('close', () => {
       db.unsubscribeSSE(listener);
@@ -131,7 +218,7 @@ async function startServer() {
   // Admin: Add Product
   app.post('/api/products', requireAdmin, (req, res) => {
     try {
-      const { name, bengaliName, description, price, discountPrice, stock, category, sizes, colors, images, isFeatured, isNewArrival, isPopular } = req.body;
+      const { name, bengaliName, description, price, discountPrice, stock, category, subCategory, sizes, colors, images, isFeatured, isNewArrival, isPopular, tags, rating, salesCount } = req.body;
       if (!name || !price) {
         res.status(400).json({ error: 'নাম ও মূল্য আবশ্যক।' });
         return;
@@ -153,6 +240,11 @@ async function startServer() {
         discountPrice: discountPrice ? Number(discountPrice) : undefined,
         stock: Number(stock ?? 10),
         category,
+        subCategory: subCategory || undefined,
+        tags: Array.isArray(tags) ? tags : [],
+        rating: rating ? Number(rating) : 4.8,
+        ratingCount: 1,
+        salesCount: salesCount ? Number(salesCount) : 0,
         sizes: Array.isArray(sizes) && sizes.length > 0 ? sizes : ['Standard'],
         colors: Array.isArray(colors) && colors.length > 0 ? colors : ['Standard'],
         images: processedImages.length > 0 ? processedImages : ['/logo.jpg'],

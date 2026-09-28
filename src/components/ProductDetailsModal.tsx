@@ -12,7 +12,7 @@ interface ProductDetailsModalProps {
 }
 
 export const ProductDetailsModal: React.FC<ProductDetailsModalProps> = ({ product, onClose }) => {
-  const { addToCart, setActiveModal } = useStore();
+  const { addToCart, setActiveModal, products, setSelectedProduct } = useStore();
 
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [selectedSize, setSelectedSize] = useState<string>('');
@@ -34,6 +34,25 @@ export const ProductDetailsModal: React.FC<ProductDetailsModalProps> = ({ produc
   }, [product]);
 
   if (!product) return null;
+
+  // 1. Same category recommendations (up to 4)
+  const sameCategoryProducts = products
+    .filter((p) => p.id !== product.id && p.category === product.category)
+    .slice(0, 4);
+
+  // 2. Complementary cross-category matching products
+  const getComplementaryCategory = (cat: string) => {
+    if (cat === 'শাড়ি' || cat === 'থ্রি-পিস') return ['জুয়েলারি', 'চুড়ি', 'কসমেটিকস'];
+    if (cat === 'ছেলেদের পোশাক' || cat === 'টি-শার্ট') return ['গেঞ্জি', 'ছেলেদের পোশাক'];
+    if (cat === 'জুয়েলারি' || cat === 'চুড়ি') return ['শাড়ি', 'থ্রি-পিস'];
+    if (cat === 'কসমেটিকস') return ['জুয়েলারি', 'চুড়ি'];
+    return ['শাড়ি', 'থ্রি-পিস'];
+  };
+
+  const matchingCategories = getComplementaryCategory(product.category);
+  const matchingProducts = products
+    .filter((p) => p.id !== product.id && matchingCategories.includes(p.category))
+    .slice(0, 4);
 
   const effectivePrice = product.discountPrice ?? product.price;
   const hasDiscount = product.discountPrice && product.discountPrice < product.price;
@@ -332,6 +351,125 @@ export const ProductDetailsModal: React.FC<ProductDetailsModalProps> = ({ produc
             </div>
 
           </div>
+
+          {/* SMART RECOMMENDATIONS SECTION */}
+          {((sameCategoryProducts && sameCategoryProducts.length > 0) || (matchingProducts && matchingProducts.length > 0)) && (
+            <div className="border-t border-amber-500/20 bg-[#0d0e15] p-5 sm:p-6 space-y-6">
+              
+              {/* 1. More from this category */}
+              {sameCategoryProducts.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-sm font-bold text-amber-300 flex items-center gap-1.5">
+                      <span>✨ এই ধরনের আরও {product.category}</span>
+                    </h4>
+                    <span className="text-[11px] text-gray-400">সরাসরি দেখে অর্ডার করুন</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {sameCategoryProducts.map((item) => {
+                      const effPrice = item.discountPrice ?? item.price;
+                      return (
+                        <div
+                          key={item.id}
+                          onClick={() => {
+                            setSelectedProduct(item);
+                            const modal = document.querySelector('.relative.w-full.max-w-4xl');
+                            if (modal) modal.scrollTop = 0;
+                          }}
+                          className="group cursor-pointer rounded-2xl bg-[#141622] border border-gray-800 hover:border-amber-500/40 p-2.5 transition flex flex-col justify-between"
+                        >
+                          <div className="aspect-[4/5] rounded-xl overflow-hidden bg-black/40 mb-2 relative">
+                            <img
+                              src={item.images[0] || '/logo.jpg'}
+                              alt={item.name}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                            />
+                            {item.discountPrice && (
+                              <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-md bg-rose-600 text-[10px] font-bold text-white">
+                                ছাড়
+                              </span>
+                            )}
+                          </div>
+                          <div>
+                            <p className="text-xs font-semibold text-gray-200 line-clamp-1 group-hover:text-amber-300 transition">
+                              {item.bengaliName || item.name}
+                            </p>
+                            <div className="flex items-center gap-1.5 mt-1">
+                              <span className="text-xs font-bold text-amber-400 font-mono">
+                                ৳{effPrice.toLocaleString('bn-BD')}
+                              </span>
+                              {item.discountPrice && (
+                                <span className="text-[10px] text-gray-500 line-through">
+                                  ৳{item.price.toLocaleString('bn-BD')}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* 2. Complementary Matching Products */}
+              {matchingProducts.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-sm font-bold text-amber-300 flex items-center gap-1.5">
+                      <span>💎 এর সাথে মানানসই কালেকশন</span>
+                    </h4>
+                    <span className="text-[11px] text-gray-400">জনপ্রিয় Matching Products</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {matchingProducts.map((item) => {
+                      const effPrice = item.discountPrice ?? item.price;
+                      return (
+                        <div
+                          key={item.id}
+                          onClick={() => {
+                            setSelectedProduct(item);
+                            const modal = document.querySelector('.relative.w-full.max-w-4xl');
+                            if (modal) modal.scrollTop = 0;
+                          }}
+                          className="group cursor-pointer rounded-2xl bg-[#141622] border border-gray-800 hover:border-amber-500/40 p-2.5 transition flex flex-col justify-between"
+                        >
+                          <div className="aspect-[4/5] rounded-xl overflow-hidden bg-black/40 mb-2 relative">
+                            <img
+                              src={item.images[0] || '/logo.jpg'}
+                              alt={item.name}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                            />
+                            <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/70 text-[9px] text-amber-300 font-medium">
+                              {item.category}
+                            </span>
+                          </div>
+                          <div>
+                            <p className="text-xs font-semibold text-gray-200 line-clamp-1 group-hover:text-amber-300 transition">
+                              {item.bengaliName || item.name}
+                            </p>
+                            <div className="flex items-center gap-1.5 mt-1">
+                              <span className="text-xs font-bold text-amber-400 font-mono">
+                                ৳{effPrice.toLocaleString('bn-BD')}
+                              </span>
+                              {item.discountPrice && (
+                                <span className="text-[10px] text-gray-500 line-through">
+                                  ৳{item.price.toLocaleString('bn-BD')}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+            </div>
+          )}
 
         </div>
       </div>
