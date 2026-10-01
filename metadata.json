@@ -1,6 +1,6 @@
 {
   "name": "Online Dress Mart",
-  "description": "Online Dress Mart - Exclusive Bangladeshi Fashion, Curated Dresses & Mobile Shopping Store.",
+  "description": "Online Dress Mart — শাড়ি, থ্রি-পিস, টি-শার্ট, গেঞ্জি, ছেলেদের পোশাক, কসমেটিকস, চুড়ি ও জুয়েলারিসহ বিভিন্ন পণ্যের অনলাইন শপ।",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

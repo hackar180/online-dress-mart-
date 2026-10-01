@@ -17,6 +17,18 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+  // Enable CORS & proper headers for scrapers and crawlers (Facebook, WhatsApp, Twitter, etc.)
+  app.use((_req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    next();
+  });
+
+  // Serve static assets from public folder (logo.jpg, icons, etc.)
+  const publicDir = path.resolve(process.cwd(), 'public');
+  app.use(express.static(publicDir));
+
   // Serve persistent uploaded images
   const uploadsDir = path.resolve(process.cwd(), 'uploads');
   app.use('/uploads', express.static(uploadsDir));
